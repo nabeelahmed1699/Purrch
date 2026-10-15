@@ -30,7 +30,7 @@ final class NotchWindowController {
         sceneView.onCatClick = { [weak pet] in pet?.pet() }
         sceneView.onBallGrab = { [weak pet] in pet?.grabBall() }
         sceneView.onBallMove = { [weak pet] x, y in pet?.moveBall(x: x, y: y) }
-        sceneView.onBallRelease = { [weak pet] vx, vy in pet?.throwBall(vx: vx, vy: vy) }
+        sceneView.onBallDrop = { [weak pet] in pet?.dropBall() }
         pet.onSceneChange = { [weak self] scene, catID in
             self?.sceneView.show(scene, catID: catID)
         }

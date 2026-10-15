@@ -1,8 +1,8 @@
 import Foundation
 
 /// The one ball in the hover view (wander.js `ball`). It's always there: lying on the floor,
-/// held in the user's hand, or flying, bouncing and rolling after a throw, bouncing off the
-/// sides of the view. The cat can pin it (`hold`) or bat it away (`kick`). Positions are
+/// held in the user's hand, or falling, bouncing and rolling, bouncing off the sides of the
+/// view. The cat can pin it (`hold`) or bat it away (`kick`). Positions are
 /// points from the notch centre and up from the floor.
 struct BallToy: Equatable {
     var x: Double
@@ -47,13 +47,11 @@ struct BallToy: Equatable {
         vy = 0
     }
 
-    /// Let go of (thrown, or just dropped) at this velocity, capped at `maxThrowSpeed`.
-    mutating func release(vx: Double, vy: Double, spec: WanderData.Ball) {
-        let speed = hypot(vx, vy)
-        let k = speed > spec.maxThrowSpeed ? spec.maxThrowSpeed / speed : 1
+    /// Let go of (by the user's hand or the cat's paws): it falls from where it is.
+    mutating func drop() {
         isHeld = false
-        self.vx = vx * k
-        self.vy = vy * k
+        vx = 0
+        vy = 0
     }
 
     /// Advances `dt` seconds. `wall` is how far either side of the centre it can go.

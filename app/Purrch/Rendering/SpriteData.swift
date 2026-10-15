@@ -150,8 +150,6 @@ struct WanderData: Decodable {
         let rollFriction: Double
         /// How fast it pops up when the cat bats it.
         let tossUp: Double
-        /// The hand can't fling it faster than this.
-        let maxThrowSpeed: Double
         /// Between strolls, chance the cat goes and plays with it on its own.
         let playChance: Double
     }

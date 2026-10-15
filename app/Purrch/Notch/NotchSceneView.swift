@@ -10,7 +10,7 @@ import AppKit
 ///     taller than the notch (see CLAUDE.md). Clicking the chair cat pets it: hearts float
 ///     up, and the pointer over it is a pixel-art hand. The cat's bed stands on the floor
 ///     left of the chair; while the cat naps in it, "z"s float up. The ball always lies
-///     somewhere on the floor: the hand picks it up, and drag and let go throws it.
+///     somewhere on the floor: the hand picks it up and carries it, and letting go drops it.
 /// The window is taller than the notch to make room for the hover view; the notch sits at its
 /// top, so everything else is drawn up from `notch.minY`.
 /// Sprites are drawn 1:1 in screen pixels with nearest-neighbour filtering: no blur.
@@ -31,7 +31,7 @@ final class NotchSceneView: NSView {
     private let chairLayer = CALayer()
     /// The cat once it has hopped off the chair, drawn at chair-cat size.
     private let wandererLayer = CALayer()
-    /// The one ball: picked up and thrown with the hand.
+    /// The one ball: picked up, carried and dropped with the hand.
     private let toyLayer = CALayer()
     /// The hungry cat's "meow"s and the eating cat's bowl, in the hover view.
     private let hoverSoundLayers = (0..<3).map { _ in CALayer() }
@@ -47,18 +47,15 @@ final class NotchSceneView: NSView {
     /// Called when the cat is clicked (pet it). Set by the notch window.
     var onCatClick: (() -> Void)?
     /// The hand picked the ball up, moved it (x in points from the notch centre, y up from the
-    /// floor), and let go of it (velocity in points per second, + = right, up). Set by the
-    /// notch window.
+    /// floor), and let go of it. Set by the notch window.
     var onBallGrab: (() -> Void)?
     var onBallMove: ((Double, Double) -> Void)?
-    var onBallRelease: ((Double, Double) -> Void)?
+    var onBallDrop: (() -> Void)?
     private lazy var openHand = makeCursor("open")
     private lazy var strokeHand = makeCursor("stroke")
     private var isPressing = false
-    /// Holding the ball: where the pointer is on it (from its middle), and the last few
-    /// pointer positions, to fling it with the hand's speed when let go.
-    private var ballGrip: CGPoint?
-    private var dragTrail: [(time: TimeInterval, point: CGPoint)] = []
+    /// Holding the ball (the mouse button is down on it).
+    private var isHoldingBall = false
 
     var layout: NotchLayout? {
         didSet { if layout != oldValue { redraw() } }
@@ -132,7 +129,7 @@ final class NotchSceneView: NSView {
         }
         let target = scene.chairFrame == nil ? 0.0 : 1.0
         // Closed: the hand let go of the ball (the pet drops it).
-        if target == 0 { ballGrip = nil }
+        if target == 0 { isHoldingBall = false }
         if expansion != target { startExpansionAnimation() }
         redraw()
     }
@@ -403,7 +400,7 @@ final class NotchSceneView: NSView {
     override func mouseMoved(with event: NSEvent) { updateCursor(event) }
     override func cursorUpdate(with event: NSEvent) { updateCursor(event) }
     override func mouseDragged(with event: NSEvent) {
-        if ballGrip != nil { carryBall(event) }
+        if isHoldingBall { carryBall(event) }
         updateCursor(event)
     }
 
@@ -422,12 +419,12 @@ final class NotchSceneView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if ballGrip != nil { releaseBall(event) }
+        if isHoldingBall { dropBall() }
         isPressing = false
         updateCursor(event)
     }
 
-    // MARK: - The ball: pick it up, carry it, throw it
+    // MARK: - The ball: pick it up, carry it, drop it
 
     private var ballSize: CGFloat {
         CGFloat(sprites.play.ball.size * sprites.wander.ball.pixelScale) * (layout?.pointsPerSpritePixel ?? 1)
@@ -440,40 +437,26 @@ final class NotchSceneView: NSView {
     }
 
     private func grabBall(_ event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        ballGrip = CGPoint(x: point.x - toyLayer.frame.midX, y: point.y - toyLayer.frame.midY)
-        dragTrail = [(event.timestamp, point)]
+        isHoldingBall = true
         isPressing = true
         onBallGrab?()
+        carryBall(event)
         updateCursor(event)
     }
 
-    /// The ball follows the hand, kept inside the hover view below the notch.
+    /// The ball sits on the hand's fingertips (the pointer's hot spot), so the hand never
+    /// covers it; kept inside the hover view below the notch.
     private func carryBall(_ event: NSEvent) {
-        guard let layout, let grip = ballGrip else { return }
-        let point = convert(event.locationInWindow, from: nil)
-        dragTrail.append((event.timestamp, point))
-        dragTrail.removeAll { event.timestamp - $0.time > 0.1 }
-        let floor = floorY(layout)
-        let y = min(max(point.y - grip.y - ballSize / 2 - floor, 0), ballCeiling(layout))
-        onBallMove?(Double(point.x - grip.x - layout.notch.midX), Double(y))
-    }
-
-    /// Let go: it flies off as fast as the hand was moving over the last moment, but never so
-    /// high that it would go up into the notch.
-    private func releaseBall(_ event: NSEvent) {
         guard let layout else { return }
         let point = convert(event.locationInWindow, from: nil)
-        var velocity = CGVector.zero
-        if let first = dragTrail.first, event.timestamp - first.time > 0.01 {
-            let dt = event.timestamp - first.time
-            velocity = CGVector(dx: (point.x - first.point.x) / dt, dy: (point.y - first.point.y) / dt)
-        }
-        let height = max(0, ballCeiling(layout) - (toyLayer.frame.minY - floorY(layout)))
-        let maxUp = (2 * sprites.wander.ball.gravity * Double(height)).squareRoot()
-        ballGrip = nil
-        dragTrail = []
-        onBallRelease?(Double(velocity.dx), min(Double(velocity.dy), maxUp))
+        let y = min(max(point.y - 1 - floorY(layout), 0), ballCeiling(layout))
+        onBallMove?(Double(point.x - layout.notch.midX), Double(y))
+    }
+
+    /// Let go: it drops straight down from where the hand held it.
+    private func dropBall() {
+        isHoldingBall = false
+        onBallDrop?()
     }
 
     /// The highest the ball's bottom can be above the floor without reaching into the notch.
@@ -484,7 +467,7 @@ final class NotchSceneView: NSView {
     /// The hand over the cat or the ball (closed while pressing or holding the ball), the
     /// normal arrow anywhere else.
     private func updateCursor(_ event: NSEvent) {
-        if ballGrip != nil {
+        if isHoldingBall {
             strokeHand.set()
         } else if isOverBall(event) || isOverCat(event) {
             (isPressing ? strokeHand : openHand).set()

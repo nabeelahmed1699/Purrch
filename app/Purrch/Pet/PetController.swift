@@ -251,7 +251,7 @@ final class PetController {
         show(chairScene())
     }
 
-    /// The hand picked the ball up. It follows the hand (`moveBall`) until let go (`throwBall`).
+    /// The hand picked the ball up. It follows the hand (`moveBall`) until let go (`dropBall`).
     func grabBall() {
         guard isHovered, !isPaused else { return }
         ballInHand = true
@@ -267,15 +267,14 @@ final class PetController {
         show(chairScene())
     }
 
-    /// The hand let go of the ball at this velocity (points per second; + = right, up). Thrown
-    /// hard enough, the cat goes after it.
-    func throwBall(vx: Double, vy: Double) {
+    /// The hand let go of the ball: it drops from there. Dropped from any height, the cat goes
+    /// after it.
+    func dropBall() {
         guard ballInHand else { return }
         ballInHand = false
-        ballToy.release(vx: vx, vy: vy, spec: wander.ball)
+        ballToy.drop()
         lastBallStep = chairTime
-        guard isHovered, !isPaused, ballToy.speed > 60 else { return show(chairScene()) }
-        sound.play(.throwBall)
+        guard isHovered, !isPaused, ballToy.y > 8 else { return show(chairScene()) }
         if state == .sleeping, wanderer == nil { reactInSleep() }
         if state != .sleeping {
             if wanderer == nil { wanderer = Wanderer(data: wander, start: chairTime) }
@@ -297,7 +296,7 @@ final class PetController {
         // The hand is gone: the ball drops where it is.
         if !hovered, ballInHand {
             ballInHand = false
-            ballToy.release(vx: 0, vy: 0, spec: wander.ball)
+            ballToy.drop()
         }
         sound.play(hovered ? .open : .close)
         if !hovered { sound.stopPurr() }
@@ -314,7 +313,7 @@ final class PetController {
             wanderer = hoverStart().map { Wanderer(data: wander, start: 0, from: $0) }
             lastPose = nil
             // The ball lies where it was left; if the cat had it pinned, it lets go.
-            ballToy.release(vx: 0, vy: 0, spec: wander.ball)
+            ballToy.drop()
             lastBallStep = 0
             show(chairScene())
         } else {
@@ -355,13 +354,11 @@ final class PetController {
         }
         var wingScene = PlayScene.empty
         wingScene.cat = .init(x: roamX(pose.x), frame: pose.frame, facingLeft: pose.facingLeft)
-        // The ball shows out in the wings only while the cat plays with it there.
-        let ballOut = wanderer?.wantsBall == true
-        if ballOut, let toy = hoverScene.toy {
+        if let toy = hoverScene.toy {
             wingScene.ball = .init(x: roamX(toy.x), roll: toy.roll)
         }
         // Each wing opens while something is near or past that side of the notch.
-        let xs = [pose.x] + (ballOut ? hoverScene.toy.map { [$0.x] } ?? [] : [])
+        let xs = [pose.x] + (hoverScene.toy.map { [$0.x] } ?? [])
         let open = Tuning.roamWing, step = Tuning.roamWingSpeed / Tuning.playFramesPerSecond
         let ease = { (wing: Double, target: Double) in
             target > wing ? min(wing + step, target) : max(wing - step, target)
@@ -735,7 +732,9 @@ final class PetController {
         case nil: break
         }
         scene.wanderer = lastPose
-        if let lastPose, !ballInHand, wanderer?.wantsBall == true { ballBehindChair = lastPose.behindChair }
+        // Behind the chair only while the cat plays with it there; left alone, it's in front, so
+        // the chair and the bed never hide it.
+        ballBehindChair = !ballInHand && wanderer?.wantsBall == true && lastPose?.behindChair == true
         scene.hoverSounds = wanderer?.sounds ?? []
         scene.hoverBowlX = wanderer?.bowlX
         scene.catInBed = isAsleep || wanderer?.isInBed == true

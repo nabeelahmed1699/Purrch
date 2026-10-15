@@ -23,9 +23,9 @@
 // petted. Throw a hungry cat the ball and it's too weak to play: it drags itself over slowly
 // (head hanging), sniffs it, gives it one feeble tap, and goes back to begging.
 //
-// There's one ball, and it always lies somewhere in the hover view (it never goes away). Grab
-// it with the hand, drag and let go to throw it: it flies, falls, bounces and rolls, and the
-// cat drops whatever it's doing (hopping off the chair if need be), gallops over, pounces,
+// There's one ball, and it always lies somewhere in the hover view (it never goes away). Press
+// on it and the hand picks it up; it sits on the fingertips while you carry it. Let go and it
+// drops: it falls, bounces and rolls, and the cat drops whatever it's doing (hopping off the chair if need be), gallops over, pounces,
 // catches it and bats it away — maybe chasing it again — then wanders on. Now and then,
 // between strolls, the cat goes and plays with the ball on its own.
 //
@@ -154,7 +154,6 @@ const WANDER = {
     bounce: 0.45,       // how much upward speed survives a bounce
     rollFriction: 120,  // slows it while rolling, points/s²
     tossUp: 140,        // it pops up a little when the cat bats it
-    maxThrowSpeed: 700, // the hand can't fling it faster than this
     playChance: 0.25,   // between strolls, chance the cat goes and plays with it on its own
   },
 
