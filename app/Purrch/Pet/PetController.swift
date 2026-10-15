@@ -91,6 +91,8 @@ final class PetController {
     @ObservationIgnored private var roamScene = PlayScene.empty
     /// The wings while roaming, eased open on whichever side the cat (or ball) is.
     @ObservationIgnored private var roamWings = (left: 0.0, right: 0.0)
+    /// Half the notch's width in points (set by the notch window): where the wings begin.
+    @ObservationIgnored var notchHalfWidth = Tuning.fakeNotchWidth / 2
     /// True while the screen is asleep or the Mac is locked.
     @ObservationIgnored private var isSystemPaused = false
     /// What's animating right now (the ball game or a hungry routine), and what comes after it.
@@ -321,9 +323,9 @@ final class PetController {
             return
         }
         var wingScene = PlayScene.empty
-        wingScene.cat = .init(x: pose.x, frame: pose.frame, facingLeft: pose.facingLeft)
+        wingScene.cat = .init(x: roamX(pose.x), frame: pose.frame, facingLeft: pose.facingLeft)
         if let toy = hoverScene.toy {
-            wingScene.ball = .init(x: toy.x, roll: toy.roll)
+            wingScene.ball = .init(x: roamX(toy.x), roll: toy.roll)
         }
         // Each wing opens while something is near or past that side of the notch.
         let xs = [pose.x] + (hoverScene.toy.map { [$0.x] } ?? [])
@@ -336,6 +338,19 @@ final class PetController {
         wingScene.leftWing = roamWings.left
         wingScene.rightWing = roamWings.right
         show(wingScene, playingSounds: false)
+    }
+
+    /// Where a hover-view x lands in the wings. The hover view is narrower than the notch plus
+    /// its wings, so it's stretched: within `roamHiddenX` of the centre it stays inside the
+    /// notch (hidden); from there to the edge of the hover view it crosses the whole wing,
+    /// from just peeking out to standing at the wing's far end.
+    private func roamX(_ x: Double) -> Double {
+        let hidden = Tuning.roamHiddenX, edge = wander.rangeX + 5
+        let peek = notchHalfWidth - Tuning.roamCatHalfWidth
+        let far = notchHalfWidth + Tuning.roamWing - Tuning.roamCatHalfWidth
+        let d = abs(x)
+        let out = d <= hidden ? d / hidden * peek : peek + min(1, (d - hidden) / (edge - hidden)) * (far - peek)
+        return x < 0 ? -out : out
     }
 
     /// The cat is out of sight in the notch again (or something else needs it): the hover

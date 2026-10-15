@@ -95,6 +95,7 @@ final class NotchWindowController {
             panel.setFrame(layout.windowFrame, display: false)
         }
         sceneView.layout = layout
+        pet.notchHalfWidth = Double(layout.notch.width / 2)
         if !panel.isVisible { panel.orderFrontRegardless() }
         #if DEBUG
         NSLog("[Purrch] window %@ notch-in-window %@ fake=%d",

@@ -19,6 +19,9 @@ enum Tuning {
     static let roamHiddenX = 60.0
     static let roamWing = 74.0
     static let roamWingSpeed = 220.0
+    /// Half the walking cat's drawn width at notch size, in points: it stops this far short
+    /// of a wing's end.
+    static let roamCatHalfWidth = 18.0
 
     /// Shortest wait, in seconds, before a hungry cat comes out: after launch, after a
     /// game, or when it got hungry while paused. (How often it gets hungry is in hungry.js.)
