@@ -28,7 +28,9 @@ final class NotchWindowController {
         maxRightWing = CGFloat(wings.flatMap { [$0.right.from, $0.right.to] }.max() ?? 0)
 
         sceneView.onCatClick = { [weak pet] in pet?.pet() }
-        sceneView.onEmptyClick = { [weak pet] x, y in pet?.throwBall(x: x, y: y) }
+        sceneView.onBallGrab = { [weak pet] in pet?.grabBall() }
+        sceneView.onBallMove = { [weak pet] x, y in pet?.moveBall(x: x, y: y) }
+        sceneView.onBallRelease = { [weak pet] vx, vy in pet?.throwBall(vx: vx, vy: vy) }
         pet.onSceneChange = { [weak self] scene, catID in
             self?.sceneView.show(scene, catID: catID)
         }

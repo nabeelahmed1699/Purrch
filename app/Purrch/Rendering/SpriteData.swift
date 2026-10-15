@@ -140,15 +140,20 @@ struct WanderData: Decodable {
         let steps: [Step]
     }
 
-    /// The thrown ball. Speeds in points per second, gravity and friction in points/s².
+    /// The one ball. Speeds in points per second, gravity and friction in points/s².
     struct Ball: Decodable {
         let pixelScale: Int
+        /// Where it lies when the app starts, in points from the notch centre.
+        let startX: Double
         let gravity: Double
         let bounce: Double
         let rollFriction: Double
+        /// How fast it pops up when the cat bats it.
         let tossUp: Double
-        let tossSide: Double
-        let fadeAfterMs: Double
+        /// The hand can't fling it faster than this.
+        let maxThrowSpeed: Double
+        /// Between strolls, chance the cat goes and plays with it on its own.
+        let playChance: Double
     }
 
     /// Going after the ball: gallop over, then pounce, catch and bat it away.

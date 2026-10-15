@@ -3,7 +3,8 @@ import Foundation
 /// The cat after it hops off the chair (wander.js): hop down, then stroll a little way, do a
 /// random pause (scratch an ear, look around, sit and stare, ...), stroll again, and so on.
 /// Now and then it walks back to the chair, hops up, sits a while and hops off again.
-/// Throw it a ball (`noticeBall`) and it gallops over, pounces, catches and bats it away.
+/// Throw it the ball (`noticeBall`) and it gallops over, pounces, catches and bats it away;
+/// now and then it goes and plays with the ball on its own between strolls.
 /// Petting stops it for a moment. Ask it where it is with `pose(at:ball:)`, passing the hover
 /// clock in ms; nil means it's sitting on the chair (draw the chair cat). After each call,
 /// `ballCommand` says whether it's pinning or batting the ball.
@@ -72,7 +73,7 @@ struct Wanderer {
     private var facingLeft = false
     /// The frame last shown (nil on the chair), so petting knows which pose family to use.
     private var lastFrame: String?
-    /// Chases left for the ball thrown last; 0 = not interested.
+    /// Chases left for the ball (thrown, or found on its own); 0 = not interested.
     private var chasesLeft = 0
     private var ball: BallToy?
     /// Set by `pose(at:ball:)`: what it's doing to the ball right now, if anything.
@@ -315,7 +316,7 @@ struct Wanderer {
                 let chase = self.chase
                 guard let ball, chasesLeft > 0 else {
                     chasesLeft = 0
-                    if home == .hungry { tired = false; phase = .hungry(start: t) } else { startPause(at: t) }
+                    if home == .hungry { tired = false; phase = .hungry(start: t) } else { startPause(at: t, mayPlay: false) }
                     continue
                 }
                 let side: Double = ball.x >= x ? 1 : -1
@@ -375,7 +376,7 @@ struct Wanderer {
                     phase = .chase(last: start + elapsed)
                 } else {
                     chasesLeft = 0
-                    startPause(at: start + elapsed)
+                    startPause(at: start + elapsed, mayPlay: false)
                 }
             }
         }
@@ -402,8 +403,17 @@ struct Wanderer {
     }
 
     /// A random pause, picked by weight. "Back to the chair" walks to the near side of the
-    /// chair, then hops up.
-    private mutating func startPause(at start: Double) {
+    /// chair, then hops up. Or, now and then (`mayPlay`: not straight after playing), it goes
+    /// and plays with the ball.
+    private mutating func startPause(at start: Double, mayPlay: Bool = true) {
+        if mayPlay, home == .wander, ball != nil, Double.random(in: 0..<1) < data.ball.playChance {
+            tired = false
+            drowsy = false
+            chasesLeft = chase.maxChases
+            pickSide()
+            phase = .chase(last: start)
+            return
+        }
         let total = data.pauses.reduce(0) { $0 + $1.weight }
         var pick = Double.random(in: 0..<max(total, 0.001))
         guard var pause = data.pauses.first(where: { pick -= $0.weight; return pick < 0 }) ?? data.pauses.last else {

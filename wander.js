@@ -23,9 +23,11 @@
 // petted. Throw a hungry cat the ball and it's too weak to play: it drags itself over slowly
 // (head hanging), sniffs it, gives it one feeble tap, and goes back to begging.
 //
-// Click empty space in the hover view to throw the ball there: it pops up, falls, bounces and
-// rolls, and the cat drops whatever it's doing (hopping off the chair if need be), gallops
-// over, pounces, catches it and bats it away — maybe chasing it again — then wanders on.
+// There's one ball, and it always lies somewhere in the hover view (it never goes away). Grab
+// it with the hand, drag and let go to throw it: it flies, falls, bounces and rolls, and the
+// cat drops whatever it's doing (hopping off the chair if need be), gallops over, pounces,
+// catches it and bats it away — maybe chasing it again — then wanders on. Now and then,
+// between strolls, the cat goes and plays with the ball on its own.
 //
 // Petting works here too, any time (even mid-hop): click the cat and it stops right where it
 // is, in the same pose family (standing, sitting side-on, facing you, on the chair), and
@@ -144,15 +146,16 @@ const WANDER = {
   // Eating, in the hover view: head bobbing into the bowl in front of it.
   eating: { steps: [['frontEat1', 200], ['frontEat2', 200]] },
 
-  // The thrown ball (play-frames.js ball, drawn at `pixelScale`). Speeds in points per second.
+  // The ball (play-frames.js ball, drawn at `pixelScale`). Speeds in points per second.
   ball: {
     pixelScale: 2,
+    startX: 70,         // where it lies when the app starts
     gravity: 900,       // pulls it down, points/s²
     bounce: 0.45,       // how much upward speed survives a bounce
     rollFriction: 120,  // slows it while rolling, points/s²
-    tossUp: 140,        // it pops up a little when thrown...
-    tossSide: 70,       // ...and goes a random bit sideways (up to this fast)
-    fadeAfterMs: 5000,  // left alone and still for this long, it fades away
+    tossUp: 140,        // it pops up a little when the cat bats it
+    maxThrowSpeed: 700, // the hand can't fling it faster than this
+    playChance: 0.25,   // between strolls, chance the cat goes and plays with it on its own
   },
 
   // Going after the ball.

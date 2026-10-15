@@ -72,8 +72,11 @@ final class PetController {
     @ObservationIgnored private let wander: WanderData
     @ObservationIgnored private var wanderer: Wanderer?
     @ObservationIgnored private var lastPose: Wanderer.Pose?
-    /// The ball thrown in the hover view, and when it was last moved on (chair clock, ms).
-    @ObservationIgnored private var ballToy: BallToy?
+    /// The one ball in the hover view. It never goes away: it stays where it was left, even
+    /// between hovers. When it was last moved on (chair clock, ms).
+    @ObservationIgnored private var ballToy: BallToy
+    /// In the user's hand: it follows the pointer, and the cat leaves it alone.
+    @ObservationIgnored private var ballInHand = false
     /// Which side of the chair the ball is on: wherever the cat last played with it.
     @ObservationIgnored private var ballBehindChair = false
     @ObservationIgnored private var lastBallStep = 0.0
@@ -132,6 +135,7 @@ final class PetController {
         petting = sprites.petting
         wander = sprites.wander
         sleep = sprites.sleep
+        ballToy = BallToy(x: sprites.wander.ball.startX)
         let defaults = UserDefaults.standard
         soundEnabled = defaults.object(forKey: Self.soundEnabledKey) as? Bool ?? true
         soundVolume = defaults.string(forKey: Self.soundVolumeKey).flatMap(SoundVolume.init) ?? .low
@@ -247,21 +251,42 @@ final class PetController {
         show(chairScene())
     }
 
-    /// Empty space in the hover view was clicked: throw the ball there (x from the notch
-    /// centre, y up from the floor). The cat goes after it.
-    func throwBall(x: Double, y: Double) {
+    /// The hand picked the ball up. It follows the hand (`moveBall`) until let go (`throwBall`).
+    func grabBall() {
         guard isHovered, !isPaused else { return }
-        if state == .sleeping, wanderer == nil { reactInSleep() }
-        ballToy = BallToy(x: x, y: y, spec: wander.ball)
+        ballInHand = true
+        // In the hand it's in front of everything, wherever the cat left it.
         ballBehindChair = false
+        show(chairScene())
+    }
+
+    /// The hand holding the ball moved: x from the notch centre, y up from the floor.
+    func moveBall(x: Double, y: Double) {
+        guard ballInHand else { return }
+        ballToy.carry(to: min(max(x, -ballWall), ballWall), y: max(y, 0))
+        show(chairScene())
+    }
+
+    /// The hand let go of the ball at this velocity (points per second; + = right, up). Thrown
+    /// hard enough, the cat goes after it.
+    func throwBall(vx: Double, vy: Double) {
+        guard ballInHand else { return }
+        ballInHand = false
+        ballToy.release(vx: vx, vy: vy, spec: wander.ball)
         lastBallStep = chairTime
+        guard isHovered, !isPaused, ballToy.speed > 60 else { return show(chairScene()) }
         sound.play(.throwBall)
+        if state == .sleeping, wanderer == nil { reactInSleep() }
         if state != .sleeping {
             if wanderer == nil { wanderer = Wanderer(data: wander, start: chairTime) }
-            wanderer?.noticeBall(at: chairTime, ballX: x)
+            wanderer?.noticeBall(at: chairTime, ballX: ballToy.x)
         }
         show(chairScene())
     }
+
+    /// How far either side of the centre the ball can go: a little past where the cat roams,
+    /// so it can always reach the ball whole.
+    private var ballWall: Double { wander.rangeX + 5 }
 
     /// Mouse entered or left the notch. While hovered the chair cat sits in the grown shape;
     /// whatever was going on freezes and carries on afterwards. The hover view freezes too:
@@ -269,6 +294,11 @@ final class PetController {
     func setHovered(_ hovered: Bool) {
         guard hovered != isHovered else { return }
         isHovered = hovered
+        // The hand is gone: the ball drops where it is.
+        if !hovered, ballInHand {
+            ballInHand = false
+            ballToy.release(vx: 0, vy: 0, spec: wander.ball)
+        }
         sound.play(hovered ? .open : .close)
         if !hovered { sound.stopPurr() }
         if hovered, stateChangesAtHoverEnd == stateChanges {
@@ -283,7 +313,8 @@ final class PetController {
             peek = nil
             wanderer = hoverStart().map { Wanderer(data: wander, start: 0, from: $0) }
             lastPose = nil
-            ballToy = nil
+            // The ball lies where it was left; if the cat had it pinned, it lets go.
+            ballToy.release(vx: 0, vy: 0, spec: wander.ball)
             lastBallStep = 0
             show(chairScene())
         } else {
@@ -324,11 +355,13 @@ final class PetController {
         }
         var wingScene = PlayScene.empty
         wingScene.cat = .init(x: roamX(pose.x), frame: pose.frame, facingLeft: pose.facingLeft)
-        if let toy = hoverScene.toy {
+        // The ball shows out in the wings only while the cat plays with it there.
+        let ballOut = wanderer?.wantsBall == true
+        if ballOut, let toy = hoverScene.toy {
             wingScene.ball = .init(x: roamX(toy.x), roll: toy.roll)
         }
         // Each wing opens while something is near or past that side of the notch.
-        let xs = [pose.x] + (hoverScene.toy.map { [$0.x] } ?? [])
+        let xs = [pose.x] + (ballOut ? hoverScene.toy.map { [$0.x] } ?? [] : [])
         let open = Tuning.roamWing, step = Tuning.roamWingSpeed / Tuning.playFramesPerSecond
         let ease = { (wing: Double, target: Double) in
             target > wing ? min(wing + step, target) : max(wing - step, target)
@@ -361,7 +394,6 @@ final class PetController {
         stateChangesAtHoverEnd = nil
         wanderer = nil
         lastPose = nil
-        ballToy = nil
         if routine == nil { show(.empty) }
         pauseOrResume()
     }
@@ -685,42 +717,35 @@ final class PetController {
         if wanderer == nil, !isAsleep, !isPetted, chairTime - max(petUntil, 0) >= wander.afterMs {
             wanderer = Wanderer(data: wander, start: chairTime)
         }
-        // The ball moves on, then the cat reacts to where it is (and may pin or bat it).
-        if var ball = ballToy {
-            // Walls a little past where the cat roams, so it can always reach the ball whole.
-            ball.step((chairTime - lastBallStep) / 1000, spec: wander.ball, wall: wander.rangeX + 5)
-            ballToy = ball
+        // The ball moves on, then the cat reacts to where it is (and may pin or bat it). While
+        // it's in the hand, the cat can't see it to play with.
+        if !ballInHand {
+            ballToy.step((chairTime - lastBallStep) / 1000, spec: wander.ball, wall: ballWall)
             // Louder the harder it lands; the tiny settling hits are silent.
-            if ball.impact > 80 { sound.play(.bounce, level: Float(min(1, ball.impact / 400))) }
+            if ballToy.impact > 80 { sound.play(.bounce, level: Float(min(1, ballToy.impact / 400))) }
         }
         lastBallStep = chairTime
-        lastPose = wanderer?.pose(at: chairTime, ball: ballToy) ?? (isAsleep ? sleepPose() : chairSitPose(isPetted: isPetted))
-        switch wanderer?.ballCommand {
-        case .hold(let x)?: ballToy?.hold(at: x)
+        lastPose = wanderer?.pose(at: chairTime, ball: ballInHand ? nil : ballToy)
+            ?? (isAsleep ? sleepPose() : chairSitPose(isPetted: isPetted))
+        switch ballInHand ? nil : wanderer?.ballCommand {
+        case .hold(let x)?: ballToy.hold(at: x)
         case .kick(let vx)?:
-            ballToy?.kick(vx: vx, spec: wander.ball)
+            ballToy.kick(vx: vx, spec: wander.ball)
             sound.play(.swat)
         case nil: break
         }
         scene.wanderer = lastPose
-        if let lastPose, wanderer?.wantsBall == true { ballBehindChair = lastPose.behindChair }
+        if let lastPose, !ballInHand, wanderer?.wantsBall == true { ballBehindChair = lastPose.behindChair }
         scene.hoverSounds = wanderer?.sounds ?? []
         scene.hoverBowlX = wanderer?.bowlX
         scene.catInBed = isAsleep || wanderer?.isInBed == true
         // No "z"s while it's peeking.
         if isAsleep, peek == nil { scene.sleepZs = sleepZs() }
-        if let ball = ballToy {
-            // Left alone and still for a while: it fades away.
-            let fade = (wanderer?.wantsBall ?? false) ? 0 : (ball.stillMs - wander.ball.fadeAfterMs) / 500
-            if fade >= 1 {
-                ballToy = nil
-            } else {
-                // One roll frame per quarter turn of the ball (its diameter in points on Retina).
-                let diameter = Double(play.ball.size * wander.ball.pixelScale) / 2
-                let quarterTurn = .pi * diameter / 4
-                scene.toy = .init(x: ball.x, y: ball.y, roll: Int(abs(ball.x) / quarterTurn) % 4, opacity: 1 - max(0, fade), isHeld: ball.isHeld, behindChair: ballBehindChair)
-            }
-        }
+        // One roll frame per quarter turn of the ball (its diameter in points on Retina).
+        let diameter = Double(play.ball.size * wander.ball.pixelScale) / 2
+        let quarterTurn = .pi * diameter / 4
+        scene.toy = .init(x: ballToy.x, y: ballToy.y, roll: Int(abs(ballToy.x) / quarterTurn) % 4,
+                          isHeld: ballToy.isHeld, isInHand: ballInHand, behindChair: ballBehindChair)
         let heartsLast = petting.hearts.map { $0.at + $0.ms }.max() ?? 0
         petClicks.removeAll { chairTime - $0.time >= heartsLast }
         for click in petClicks {

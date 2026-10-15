@@ -33,9 +33,10 @@ struct PlayScene: Equatable {
         var x: Double
         var y: Double
         var roll: Int
-        var opacity: Double
         /// Pinned under the cat's paws: drawn in front of the cat (otherwise behind it).
         var isHeld: Bool
+        /// In the user's hand: drawn in front of everything.
+        var isInHand = false
         /// On the far side of the chair (it goes where the cat plays with it).
         var behindChair = false
     }
@@ -50,7 +51,7 @@ struct PlayScene: Equatable {
     /// The cat once it has hopped off the chair and is wandering the hover view (the chair is
     /// then drawn empty). y is up from the hover view's floor.
     var wanderer: Wanderer.Pose?
-    /// The ball the user threw in the hover view. y is up from the floor.
+    /// The one ball in the hover view (it's always there). y is up from the floor.
     var toy: Toy?
     /// The hover view's floating "meow"s (hungry cat) and the bowl's x (eating cat).
     var hoverSounds: [Sound] = []
