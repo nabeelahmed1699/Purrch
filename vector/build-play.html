@@ -59,7 +59,8 @@ const W = 80, H = 64; // side-view frame size in pixels
 // Sitting frames are also drawn at twice the size for the hover view, where the cat is shown
 // 64 pt tall: one sprite pixel per screen pixel there, instead of the 64 px frame doubled.
 const HD_W = W * 2, HD_H = H * 2;
-const HD_FRAMES = [...Object.keys(SIT_POSES), 'sitSide', 'sitSidePet', 'scratchReach', 'scratch1', 'scratch2'];
+const HD_FRAMES = [...Object.keys(SIT_POSES), 'sitSide', 'sitSidePet', 'scratchReach', 'scratch1', 'scratch2',
+  ...Object.keys(SIDE_POSES).filter((n) => n.startsWith('groom'))];
 const BALL_SIZE = 14;
 
 function render(svg, w, h) {

@@ -406,9 +406,16 @@ struct Wanderer {
     private mutating func startPause(at start: Double) {
         let total = data.pauses.reduce(0) { $0 + $1.weight }
         var pick = Double.random(in: 0..<max(total, 0.001))
-        guard let pause = data.pauses.first(where: { pick -= $0.weight; return pick < 0 }) ?? data.pauses.last else {
+        guard var pause = data.pauses.first(where: { pick -= $0.weight; return pick < 0 }) ?? data.pauses.last else {
             return startWalk(at: start)
         }
+        #if DEBUG
+        // Launch with PURRCH_PAUSE=grooms (a wander.js pause name) to always pick that pause.
+        if let name = ProcessInfo.processInfo.environment["PURRCH_PAUSE"],
+           let forced = data.pauses.first(where: { $0.name == name }) {
+            pause = forced
+        }
+        #endif
         if pause.inFront, behindChair {
             // Facing-you pauses (pawing for attention) only happen in front of the chair.
             startWalk(at: start)

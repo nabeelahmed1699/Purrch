@@ -13,7 +13,7 @@
 // side when it's clear of the chair, so it never pops through it; behind the chair it may
 // even stop and sit there, peeking out.
 //
-// Between strolls it picks a pause at random: looking around, sitting to scratch an ear,
+// Between strolls it picks a pause at random: looking around, sitting to scratch an ear or groom,
 // sitting and staring at you, ... or heading back to the chair for a while before hopping
 // off again.
 //
@@ -89,6 +89,20 @@ const WANDER = {
       ['scratchReach', 140], ['sitSide', 450], ['scratchReach', 140],
       ['scratch1', 110], ['scratch2', 110], ['scratch1', 110], ['scratch2', 110], ['scratch1', 110], ['scratch2', 110],
       ['scratchReach', 160], ['sitSide', 900],
+    ] },
+    // Grooming: licks a front paw and washes its face with it (paw wiping from over the ear
+    // down to the nose), licks its chest, then turns round and licks its flank.
+    { name: 'grooms', weight: 2, steps: [
+      ['sitSide', 500],
+      ['groomLick1', 180], ['groomLick2', 160], ['groomLick1', 180], ['groomLick2', 160], ['groomLick1', 180], ['groomLick2', 220],
+      ['groomWash1', 180], ['groomWash2', 140], ['groomWash3', 140], ['groomWash4', 200],
+      ['groomLick1', 180], ['groomLick2', 160], ['groomLick1', 180], ['groomLick2', 200],
+      ['groomWash1', 180], ['groomWash2', 140], ['groomWash3', 140], ['groomWash4', 200],
+      ['groomLick1', 180], ['groomLick2', 300], ['sitSide', 500],
+      ['groomChest2', 250], ['groomChest1', 200], ['groomChest2', 180], ['groomChest1', 200], ['groomChest2', 180], ['groomChest1', 200],
+      ['groomChest2', 250], ['sitSide', 400],
+      ['groomFlank2', 300], ['groomFlank1', 220], ['groomFlank2', 200], ['groomFlank1', 220], ['groomFlank2', 200], ['groomFlank1', 220],
+      ['groomFlank2', 300], ['sitSide', 900],
     ] },
     { name: 'sits for a bit', steps: [['sitSide', 1800], ['sitSidePet', 300], ['sitSide', 1200]] },
     { name: 'back to the chair', chair: true, weight: 2 },
@@ -186,5 +200,7 @@ const WANDER = {
   pettedSitting: [['sitSidePet', 1000]],
   pettedFront: [['frontBlink', 700], ['frontMeow2', 300], ['frontBlink', 500]],
   // Frames that count as "sitting side-on" for petting.
-  sittingFrames: ['sitSide', 'sitSidePet', 'scratchReach', 'scratch1', 'scratch2'],
+  sittingFrames: ['sitSide', 'sitSidePet', 'scratchReach', 'scratch1', 'scratch2',
+                  'groomLick1', 'groomLick2', 'groomWash1', 'groomWash2', 'groomWash3', 'groomWash4',
+                  'groomChest1', 'groomChest2', 'groomFlank1', 'groomFlank2'],
 };

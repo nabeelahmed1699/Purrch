@@ -22,6 +22,12 @@
 //   scratch  { at: [x, y], k }: the near back leg folds up and its paw lands on point (x, y)
 //            of the head drawing (the ear), solved like a two-joint arm; k = leg length
 //            factor. The leg runs behind the head and the paw is drawn on top of it.
+//   paw    { at: [x, y], k }: grooming. The near front leg bends up and its paw lands on point
+//          (x, y) of the head drawing (the mouth to lick it, the ear or cheek to wash), elbow
+//          down; the paw is drawn on top of the head. k = leg length factor.
+//   tongue true: the tongue pokes out of the mouth (licking)
+//   turn   true: the head is turned back over the shoulder (mirrored, facing the tail), to
+//          lick its flank. headShift and head rotation still apply; + head = nose down.
 
 // x, y, width, height of the side-view drawing area (4:5.12 = 80 x 64 px at 64 px tall).
 const SIDE_VIEWBOX = [-50, 0, 250, 200];
@@ -78,6 +84,29 @@ const SIDE_POSES = {
     scratch: { at: [147, 78], k: 2.3 }, legs: { nf: [20, -12], ff: [24, -12], nb: [85, 175], fb: [80, 170] } },
   scratch2: { y: 18, tilt: -28, len: 0.85, head: 46, headShift: [-10, 15], tail: -50, eyes: 'closed',
     scratch: { at: [141, 88], k: 2.3 }, legs: { nf: [20, -12], ff: [24, -12], nb: [85, 175], fb: [80, 170] } },
+  // Grooming, sitting side-on. Licking a front paw (tongue out, then in), then washing the
+  // face with it: the paw wipes from over the ear down to the nose. Then licking its chest,
+  // and its flank with the head turned back over the shoulder.
+  groomLick1: { y: 18, tilt: -40, len: 0.85, head: 52, tail: -50, eyes: 'half', tongue: true,
+    paw: { at: [174, 134], k: 1.1 }, legs: { nf: [20, -12], ff: [24, -12], nb: [85, 175], fb: [80, 170] } },
+  groomLick2: { y: 18, tilt: -40, len: 0.85, head: 50, tail: -50, eyes: 'closed',
+    paw: { at: [172, 137], k: 1.1 }, legs: { nf: [20, -12], ff: [24, -12], nb: [85, 175], fb: [80, 170] } },
+  groomWash1: { y: 18, tilt: -40, len: 0.85, head: 66, headShift: [-4, 6], tail: -50, eyes: 'closed',
+    paw: { at: [158, 82], k: 1.35 }, legs: { nf: [20, -12], ff: [24, -12], nb: [85, 175], fb: [80, 170] } },
+  groomWash2: { y: 18, tilt: -40, len: 0.85, head: 62, headShift: [-4, 6], tail: -50, eyes: 'closed',
+    paw: { at: [172, 94], k: 1.35 }, legs: { nf: [20, -12], ff: [24, -12], nb: [85, 175], fb: [80, 170] } },
+  groomWash3: { y: 18, tilt: -40, len: 0.85, head: 58, headShift: [-3, 5], tail: -50, eyes: 'closed',
+    paw: { at: [180, 104], k: 1.35 }, legs: { nf: [20, -12], ff: [24, -12], nb: [85, 175], fb: [80, 170] } },
+  groomWash4: { y: 18, tilt: -40, len: 0.85, head: 56, headShift: [-3, 5], tail: -50, eyes: 'closed',
+    paw: { at: [184, 114], k: 1.35 }, legs: { nf: [20, -12], ff: [24, -12], nb: [85, 175], fb: [80, 170] } },
+  groomChest1: { y: 18, tilt: -40, len: 0.85, head: 92, headShift: [-6, 6], tail: -50, eyes: 'closed', tongue: true,
+    legs: { nf: [20, -12], ff: [24, -12], nb: [85, 175], fb: [80, 170] } },
+  groomChest2: { y: 18, tilt: -40, len: 0.85, head: 86, headShift: [-6, 4], tail: -50, eyes: 'closed',
+    legs: { nf: [20, -12], ff: [24, -12], nb: [85, 175], fb: [80, 170] } },
+  groomFlank1: { y: 18, tilt: -40, len: 0.85, head: 20, headShift: [-14, 2], turn: true, tail: -50, eyes: 'closed', tongue: true,
+    legs: { nf: [20, -12], ff: [24, -12], nb: [85, 175], fb: [80, 170] } },
+  groomFlank2: { y: 18, tilt: -40, len: 0.85, head: 12, headShift: [-11, -1], turn: true, tail: -50, eyes: 'closed',
+    legs: { nf: [20, -12], ff: [24, -12], nb: [85, 175], fb: [80, 170] } },
   // Asleep in the bed: lying flat, front paws out, head resting on them, tail tucked under.
   // Two frames: breathing out, then in (the back rises).
   sleep1: { y: 32, tilt: 0, len: 0.98, head: 22, headShift: [4, 22], tail: 150, eyes: 'closed',
@@ -198,29 +227,42 @@ function catSideSVG(cat, opts = {}) {
   const headDx = neck[0] - 142, headDy = neck[1] - 124;
   // Slightly oversized head: reads better (and cuter) at 32 pt.
   const [shiftX, shiftY] = pose.headShift || [0, 0];
-  const headTransform = `translate(${f(headDx + shiftX)} ${f(headDy + shiftY)}) rotate(${f(pose.tilt + pose.head)} 142 124) translate(142 124) scale(1.14) translate(-142 -124)`;
+  // Turned back (licking its flank): the head is mirrored about the neck, so it faces the tail.
+  const turn = pose.turn ? -1 : 1;
+  const headAngle = pose.tilt + turn * pose.head;
+  const headTransform = `translate(${f(headDx + shiftX)} ${f(headDy + shiftY)}) rotate(${f(headAngle)} 142 124) translate(142 124) scale(${f(1.14 * turn)} 1.14) translate(-142 -124)`;
 
-  // Scratching: fold the near back leg so its paw lands on the ear (two-joint solve).
-  if (pose.scratch) {
-    const [px, py] = pose.scratch.at;
-    // The head drawing's transform, applied to a point: scale about the neck, rotate, move.
-    const a = rad(pose.tilt + pose.head);
-    const sx = 142 + (px - 142) * 1.14, sy = 124 + (py - 124) * 1.14;
-    const target = [
+  // The head drawing's transform, applied to a point: scale (and mirror) about the neck, rotate, move.
+  const headPoint = ([px, py]) => {
+    const a = rad(headAngle);
+    const sx = 142 + (px - 142) * 1.14 * turn, sy = 124 + (py - 124) * 1.14;
+    return [
       142 + (sx - 142) * Math.cos(a) - (sy - 124) * Math.sin(a) + headDx + shiftX,
       124 + (sx - 142) * Math.sin(a) + (sy - 124) * Math.cos(a) + headDy + shiftY,
     ];
-    const k = pose.scratch.k || 1;
+  };
+  // Two-joint solve: a leg from `joint` whose paw lands on `target`. `pickKnee` chooses
+  // between the two possible knees.
+  const reach = (joint, target, k, pickKnee) => {
     const l1 = L1 * k, l2 = L2 * k;
-    const dx = target[0] - hp[0], dy = target[1] - hp[1];
+    const dx = target[0] - joint[0], dy = target[1] - joint[1];
     const d = Math.min(Math.hypot(dx, dy), (l1 + l2) * 0.999);
     const base = Math.atan2(dy, dx);
     const off = Math.acos((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d));
-    // Two possible knees; a scratching cat's knee points forward (towards the face).
-    const knees = [base + off, base - off].map((t) => [hp[0] + l1 * Math.cos(t), hp[1] + l1 * Math.sin(t)]);
-    const knee = knees[0][0] > knees[1][0] ? knees[0] : knees[1];
-    const paw = [hp[0] + (dx / Math.hypot(dx, dy)) * d, hp[1] + (dy / Math.hypot(dx, dy)) * d];
-    legs.nb = { d: `M ${f(hp[0])} ${f(hp[1])} L ${f(knee[0])} ${f(knee[1])} L ${f(paw[0])} ${f(paw[1])}`, paw };
+    const knees = [base + off, base - off].map((t) => [joint[0] + l1 * Math.cos(t), joint[1] + l1 * Math.sin(t)]);
+    const knee = pickKnee(knees[0], knees[1]);
+    const paw = [joint[0] + (dx / Math.hypot(dx, dy)) * d, joint[1] + (dy / Math.hypot(dx, dy)) * d];
+    return { d: `M ${f(joint[0])} ${f(joint[1])} L ${f(knee[0])} ${f(knee[1])} L ${f(paw[0])} ${f(paw[1])}`, paw };
+  };
+
+  // Scratching: fold the near back leg so its paw lands on the ear. A scratching cat's knee
+  // points forward (towards the face).
+  if (pose.scratch) {
+    legs.nb = reach(hp, headPoint(pose.scratch.at), pose.scratch.k || 1, (a, b) => (a[0] > b[0] ? a : b));
+  }
+  // Grooming: the near front paw comes up to the face, elbow down.
+  if (pose.paw) {
+    legs.nf = reach(sh, headPoint(pose.paw.at), pose.paw.k || 1, (a, b) => (a[1] > b[1] ? a : b));
   }
   // Round face with a short, soft snout (a long one reads as a beak at 32 pt).
   const head = 'M 128 106 C 128 90 140 84 154 84 C 168 84 176 94 177 103 C 181 106 182 114 178 119 ' +
@@ -325,7 +367,7 @@ function catSideSVG(cat, opts = {}) {
 
   <!-- near legs -->
   ${legSVG(legs.nb, legNear, pawNear, 13)}
-  ${legSVG(legs.nf, legNear, pawNear, 11)}
+  ${pose.paw ? '' : legSVG(legs.nf, legNear, pawNear, 11)}
 
   <!-- head -->
   <g transform="${headTransform}">
@@ -344,6 +386,10 @@ function catSideSVG(cat, opts = {}) {
 
   <!-- scratching: the leg runs up behind the head; the paw shows on top, at the ear -->
   ${pose.scratch ? `<ellipse cx="${f(legs.nb.paw[0] + 2)}" cy="${f(legs.nb.paw[1])}" rx="8" ry="5.5" fill="${pawNear}" stroke="${O}" stroke-width="${f(SW)}"/>` : ''}
+  <!-- grooming: the raised front leg comes across the face, paw on top -->
+  ${pose.paw ? legSVG(legs.nf, legNear, pawNear, 11) : ''}
+  <!-- licking: the tongue goes over the paw -->
+  ${pose.tongue ? `<path transform="${headTransform}" d="M 173 117.5 C 175 116 180 116.5 182.5 119 C 184.5 122 182 126.5 178 126 C 174.5 125.5 172.5 121.5 173 117.5 Z" fill="${c.nose}" stroke="${O}" stroke-width="${f(SW)}" stroke-linejoin="round"/>` : ''}
   </g>
 </svg>`;
 }
