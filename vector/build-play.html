@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Build Purrch Play Frames</title>
+<style>
+  body { font: 13px/1.4 -apple-system, sans-serif; margin: 24px; background: #f3f1ee; color: #1d1b1a; }
+  pre { background: #fff; border: 1px solid #ddd; padding: 10px; max-height: 160px; overflow: auto; white-space: pre-wrap; }
+  a { margin-right: 12px; }
+</style>
+</head>
+<body>
+<h1>Build side-view play frames</h1>
+<p>Rasterises every side-view pose (vector/cat-side-art.js) and every sitting pose (vector/cat-sit-art.js)
+to 80 × 64 px against the shared key palette,
+computes each cat's marking overlays, and renders the ball's roll frames. Sitting frames are
+also rendered at 160 × 128 px for the hover view. Save play-frames.js into the project root.</p>
+<p id="links">building…</p>
+<h3>Report</h3><pre id="report"></pre>
+<h3>play-frames.js</h3><pre id="out"></pre>
+
+<script src="cats-vector.js"></script>
+<script src="cat-art.js"></script>
+<script src="cat-side-art.js"></script>
+<script src="cat-sit-art.js"></script>
+<script>
+// Same key-palette approach as build-parts.html: every semantic colour gets a far-apart key
+// colour, so a render can be read back as palette keys shared by all cats.
+const KEY_HEX = {
+  o: '#000000',
+  h: '#fa0000', j: '#d20000', b: '#aa0000', u: '#820000', s: '#5a0000', k: '#320000',
+  t: '#8000ff',
+  w: '#0000fa', x: '#0000a0',
+  g: '#00fa00', e: '#00aa00', f: '#005a00',
+  n: '#fa00fa', m: '#960096', i: '#ff80ff',
+  v: '#00ffff', y: '#ffffff',
+};
+const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const CAT_KEYS = Object.entries(KEY_HEX).map(([k, h]) => [k, hex(h)]);
+
+function keyCat(markings) {
+  const K = KEY_HEX;
+  return {
+    markings,
+    colors: {
+      outline: K.o, furLight: K.h, fur: K.b, furShadow: K.s, furDeep: K.k, stripe: K.t,
+      white: K.w, whiteShadow: K.x, irisLight: K.g, iris: K.e, irisDark: K.f,
+      nose: K.n, noseShadow: K.m, innerEar: K.i, blush: K.b, whisker: K.v,
+    },
+  };
+}
+
+// The ball has its own keys and palette (same ball for every cat).
+const BALL_KEY_HEX = { o: '#000000', B: '#ff0000', D: '#800000', Y: '#ffff00', y: '#ffffff' };
+const BALL_KEYS = Object.entries(BALL_KEY_HEX).map(([k, h]) => [k, hex(h)]);
+const BALL_PALETTE = { o: BALL_COLORS.outline, B: BALL_COLORS.base, D: BALL_COLORS.dark, Y: BALL_COLORS.band, y: BALL_COLORS.shine };
+
+const W = 80, H = 64; // side-view frame size in pixels
+// Sitting frames are also drawn at twice the size for the hover view, where the cat is shown
+// 64 pt tall: one sprite pixel per screen pixel there, instead of the 64 px frame doubled.
+const HD_W = W * 2, HD_H = H * 2;
+const HD_FRAMES = [...Object.keys(SIT_POSES), 'sitSide', 'sitSidePet', 'scratchReach', 'scratch1', 'scratch2'];
+const BALL_SIZE = 14;
+
+function render(svg, w, h) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      const ctx = cv.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(ctx.getImageData(0, 0, w, h).data);
+    };
+    img.onerror = reject;
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  });
+}
+
+function quantize(data, w, h, keys) {
+  const grid = [];
+  for (let y = 0; y < h; y++) {
+    const row = [];
+    for (let x = 0; x < w; x++) {
+      const p = (y * w + x) * 4;
+      if (data[p + 3] < 128) { row.push('.'); continue; }
+      let best = '.', bd = Infinity;
+      for (const [k, rgb] of keys) {
+        const d = (rgb[0] - data[p]) ** 2 + (rgb[1] - data[p + 1]) ** 2 + (rgb[2] - data[p + 2]) ** 2;
+        if (d < bd) { bd = d; best = k; }
+      }
+      row.push(best);
+    }
+    grid.push(row);
+  }
+  return grid;
+}
+
+// Remove lone shading pixels; outlines, eye shine and whiskers are left alone.
+function cleanup(grid) {
+  const h = grid.length, w = grid[0].length;
+  for (let pass = 0; pass < 2; pass++) {
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+      const ch = grid[y][x];
+      if ('oyv.'.includes(ch)) continue;
+      const nb = [grid[y - 1][x], grid[y + 1][x], grid[y][x - 1], grid[y][x + 1]];
+      const counts = {};
+      nb.forEach((n) => (counts[n] = (counts[n] || 0) + 1));
+      const [top, cnt] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+      if (!nb.includes(ch) && cnt >= 3 && top !== '.' && top !== 'o') grid[y][x] = top;
+    }
+  }
+  return grid;
+}
+
+function crop(grid, keep = (ch) => ch !== '.') {
+  const h = grid.length, w = grid[0].length;
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (keep(grid[y][x], x, y)) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  }
+  if (x1 < 0) return null;
+  const rows = [];
+  for (let y = y0; y <= y1; y++) {
+    let r = '';
+    for (let x = x0; x <= x1; x++) r += keep(grid[y][x], x, y) ? grid[y][x] : '.';
+    rows.push(r);
+  }
+  return { x: x0, y: y0, rows };
+}
+
+function layerJS(l, indent) {
+  if (!l) return 'null';
+  const pad = ' '.repeat(indent);
+  return `{ x: ${l.x}, y: ${l.y}, rows: [\n${l.rows.map((r) => `${pad}  '${r}',`).join('\n')}\n${pad}] }`;
+}
+
+(async () => {
+  const report = [];
+  const frames = {};
+  const markings = Object.fromEntries(CATS.map((c) => [c.id, {}]));
+
+  // Side view, then the sitting (facing-you) cat. The sitting cat's paws rest on the bottom
+  // edge on purpose, so only the other edges count as cut off for it.
+  const sets = [
+    { poses: SIDE_POSES, svg: catSideSVG, floorOk: false },
+    { poses: SIT_POSES, svg: catSitSVG, floorOk: true },
+  ];
+  for (const set of sets) for (const [name, pose] of Object.entries(set.poses)) {
+    const draw = async (m) => cleanup(quantize(
+      await render(set.svg(keyCat(m), { pose, markings: !!m, pixel: true, spriteSize: H }), W, H), W, H, CAT_KEYS));
+    const base = await draw(false);
+    frames[name] = crop(base);
+    // A frame touching the canvas edge means something got cut off.
+    const touches = base[0].some((c) => c !== '.') || (!set.floorOk && base[H - 1].some((c) => c !== '.')) ||
+      base.some((r) => r[0] !== '.' || r[W - 1] !== '.');
+    if (touches) report.push(`WARN ${name}: touches the frame edge`);
+    for (const cat of CATS) {
+      const marked = await draw(cat.markings);
+      const overlay = crop(marked, (ch, x, y) => ch !== '.' && ch !== base[y][x]);
+      if (overlay) markings[cat.id][name] = overlay;
+    }
+  }
+
+  // The sitting frames again, at HD size.
+  const hdFrames = {};
+  const hdMarkings = Object.fromEntries(CATS.map((c) => [c.id, {}]));
+  for (const set of sets) for (const [name, pose] of Object.entries(set.poses)) {
+    if (!HD_FRAMES.includes(name)) continue;
+    const draw = async (m) => cleanup(quantize(
+      await render(set.svg(keyCat(m), { pose, markings: !!m, pixel: true, spriteSize: HD_H }), HD_W, HD_H), HD_W, HD_H, CAT_KEYS));
+    const base = await draw(false);
+    hdFrames[name] = crop(base);
+    for (const cat of CATS) {
+      const marked = await draw(cat.markings);
+      const overlay = crop(marked, (ch, x, y) => ch !== '.' && ch !== base[y][x]);
+      if (overlay) hdMarkings[cat.id][name] = overlay;
+    }
+  }
+
+  const ball = {};
+  for (let i = 0; i < 4; i++) {
+    const g = quantize(await render(ballSVG(i * 45, { pixel: true, colors: {
+      outline: BALL_KEY_HEX.o, base: BALL_KEY_HEX.B, dark: BALL_KEY_HEX.D, band: BALL_KEY_HEX.Y, shine: BALL_KEY_HEX.y,
+    } }), BALL_SIZE, BALL_SIZE), BALL_SIZE, BALL_SIZE, BALL_KEYS);
+    ball[`roll${i}`] = crop(g);
+  }
+
+  report.push(`frames: ${Object.keys(frames).join(', ')}`);
+  report.push(`hd frames: ${Object.keys(hdFrames).join(', ')}`);
+  for (const cat of CATS) report.push(`${cat.id} overlays: ${Object.keys(markings[cat.id]).length} frames`);
+
+  const out = `// Side-view play frames for every Purrch cat — generated by vector/build-play.html.
+// Frames are cropped grids of palette keys (same keys as parts.js / cats.js) placed at (x, y)
+// on an ${W} x ${H} px frame, facing right; mirror them to face left. '.' is transparent.
+// PLAY_MARKINGS[cat][frame] is that cat's overlay, drawn on top of the shared frame.
+
+const PLAY_FRAMES = {
+  width: ${W},
+  height: ${H},
+  frames: {
+${Object.entries(frames).map(([n, l]) => `    ${n}: ${layerJS(l, 4)},`).join('\n')}
+  },
+};
+
+const PLAY_MARKINGS = {
+${CATS.map((cat) => `  ${cat.id}: {
+${Object.entries(markings[cat.id]).map(([n, l]) => `    ${n}: ${layerJS(l, 4)},`).join('\n')}
+  },`).join('\n')}
+};
+
+// The sitting frames at twice the size (${HD_W} x ${HD_H} px), for the hover view. Same keys,
+// same layout; PLAY_MARKINGS_HD[cat][frame] is the cat's overlay.
+const PLAY_FRAMES_HD = {
+  width: ${HD_W},
+  height: ${HD_H},
+  frames: {
+${Object.entries(hdFrames).map(([n, l]) => `    ${n}: ${layerJS(l, 4)},`).join('\n')}
+  },
+};
+
+const PLAY_MARKINGS_HD = {
+${CATS.map((cat) => `  ${cat.id}: {
+${Object.entries(hdMarkings[cat.id]).map(([n, l]) => `    ${n}: ${layerJS(l, 4)},`).join('\n')}
+  },`).join('\n')}
+};
+
+// The ball: its own palette, four roll frames (${BALL_SIZE} x ${BALL_SIZE} px).
+const BALL = {
+  size: ${BALL_SIZE},
+  palette: ${JSON.stringify(BALL_PALETTE)},
+  frames: {
+${Object.entries(ball).map(([n, l]) => `    ${n}: ${layerJS(l, 4)},`).join('\n')}
+  },
+};
+`;
+
+  document.getElementById('out').textContent = out;
+  document.getElementById('report').textContent = report.join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([out], { type: 'text/javascript' }));
+  a.download = 'play-frames.js';
+  a.textContent = 'Download play-frames.js';
+  const links = document.getElementById('links');
+  links.textContent = '';
+  links.appendChild(a);
+})().catch((e) => { document.getElementById('report').textContent = 'ERROR ' + e.stack; });
+</script>
+</body>
+</html>

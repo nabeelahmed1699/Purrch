@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Build Purrch Parts</title>
+<style>
+  body { font: 13px/1.4 -apple-system, sans-serif; margin: 24px; background: #f3f1ee; color: #1d1b1a; }
+  pre { background: #fff; border: 1px solid #ddd; padding: 10px; max-height: 160px; overflow: auto; white-space: pre-wrap; }
+  a { margin-right: 12px; }
+</style>
+</head>
+<body>
+<h1>Build pixel parts from the vector source</h1>
+<p>Rasterises every part variant once against a shared key palette, computes each cat's marking overlays,
+and checks that composited frames match a direct render. Save the files into the project root.
+Open with <code>?size=64</code> for a 64 px set (parts-64.js, markings-64.js); nothing uses it today, the exporter reads the 128 px files.</p>
+<p id="links">building…</p>
+<h3>Report</h3><pre id="report"></pre>
+<h3>parts.js</h3><pre id="parts"></pre>
+<h3>markings.js</h3><pre id="markings"></pre>
+<h3>cats.js</h3><pre id="cats"></pre>
+
+<script src="cats-vector.js"></script>
+<script src="cat-art.js"></script>
+<script src="../idle.js"></script>
+<script src="../sprite.js"></script>
+<script>
+// ---------- key palette ----------
+// Every semantic colour gets a far-apart "key colour", so a render can be read back as keys.
+// Fur, white, iris and wood are separate hue ramps so gradients fall onto their own ramp.
+const KEY_HEX = {
+  o: '#000000',
+  h: '#fa0000', j: '#d20000', b: '#aa0000', u: '#820000', s: '#5a0000', k: '#320000',
+  t: '#8000ff',
+  w: '#0000fa', x: '#0000a0',
+  g: '#00fa00', e: '#00aa00', f: '#005a00',
+  n: '#fa00fa', m: '#960096', i: '#ff80ff',
+  v: '#00ffff', y: '#ffffff',
+  l: '#fafa00', a: '#d2d200', c: '#aaaa00', z: '#828200', d: '#5a5a00', q: '#323200',
+};
+const BLUSH_KEY = '#ff8000';
+const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const toHex = (c) => '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+const mix = (a, b, t) => toHex(hex(a).map((v, i) => v + (hex(b)[i] - v) * t));
+KEY_HEX.r = mix(KEY_HEX.b, BLUSH_KEY, 0.35);
+const KEYS = Object.entries(KEY_HEX).map(([k, h]) => [k, hex(h)]);
+
+function keyCat(markings) {
+  const K = KEY_HEX;
+  return {
+    markings,
+    colors: {
+      outline: K.o, furLight: K.h, fur: K.b, furShadow: K.s, furDeep: K.k, stripe: K.t,
+      white: K.w, whiteShadow: K.x, irisLight: K.g, iris: K.e, irisDark: K.f,
+      nose: K.n, noseShadow: K.m, innerEar: K.i, blush: BLUSH_KEY, whisker: K.v,
+    },
+    wood: { light: K.l, base: K.c, shadow: K.d, deep: K.q },
+  };
+}
+
+// Palette each cat uses for the keys.
+function paletteFor(cat) {
+  const c = cat.colors;
+  return {
+    o: c.outline, h: c.furLight, j: mix(c.furLight, c.fur, 0.5), b: c.fur, u: mix(c.fur, c.furShadow, 0.5),
+    s: c.furShadow, k: c.furDeep, t: c.stripe, w: c.white, x: c.whiteShadow,
+    g: c.irisLight, e: c.iris, f: c.irisDark, n: c.nose, m: c.noseShadow, i: c.innerEar,
+    r: mix(c.fur, c.blush, 0.35), v: c.whisker, y: '#ffffff',
+    l: WOOD.light, a: mix(WOOD.light, WOOD.base, 0.5), c: WOOD.base, z: mix(WOOD.base, WOOD.shadow, 0.5),
+    d: WOOD.shadow, q: WOOD.deep,
+  };
+}
+
+// ---------- part variants (pose parameters for each named variant) ----------
+const VARIANTS = {
+  chair: { default: {} },
+  tail: { center: { tail: 0 }, right1: { tail: 0.7 }, right2: { tail: 1 }, left1: { tail: -0.7 }, left2: { tail: -1 } },
+  torso: { breath0: { breath: 0 }, breath1: { breath: 1 }, breath2: { breath: 2 } },
+  haunches: { default: {} },
+  legs: { default: {} },
+  ears: { rest: { ear: 0 }, twitchHalf: { ear: 0.5 }, twitch: { ear: 1 } },
+  head: { default: {} },
+  eyes: { open: { eyes: 'open' }, half: { eyes: 'half' }, closed: { eyes: 'closed' } },
+};
+
+// ---------- rasterise ----------
+// Output size: 128 by default (what tools/export-sprites.mjs reads), or ?size=N for another size.
+const N = Number(new URLSearchParams(location.search).get('size')) || SPRITE_SIZE;
+const SUFFIX = N === SPRITE_SIZE ? '' : `-${N}`;
+// idle.js head lifts are in 128px pixels; at smaller sizes round down to whole pixels.
+const headUpAt = (h) => Math.floor((h * N) / SPRITE_SIZE);
+function render(svg) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = N;
+      const ctx = cv.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0, N, N);
+      resolve(ctx.getImageData(0, 0, N, N).data);
+    };
+    img.onerror = reject;
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  });
+}
+
+function quantize(data) {
+  const grid = [];
+  for (let y = 0; y < N; y++) {
+    const row = [];
+    for (let x = 0; x < N; x++) {
+      const p = (y * N + x) * 4;
+      if (data[p + 3] < 128) { row.push('.'); continue; }
+      let best = '.', bd = Infinity;
+      for (const [k, rgb] of KEYS) {
+        const d = (rgb[0] - data[p]) ** 2 + (rgb[1] - data[p + 1]) ** 2 + (rgb[2] - data[p + 2]) ** 2;
+        if (d < bd) { bd = d; best = k; }
+      }
+      row.push(best);
+    }
+    grid.push(row);
+  }
+  return grid;
+}
+
+// Remove lone shading pixels; outlines, eye shine and whiskers are left alone.
+function cleanup(grid) {
+  for (let pass = 0; pass < 2; pass++) {
+    for (let y = 1; y < N - 1; y++) for (let x = 1; x < N - 1; x++) {
+      const ch = grid[y][x];
+      if ('oyv.'.includes(ch)) continue;
+      const nb = [grid[y - 1][x], grid[y + 1][x], grid[y][x - 1], grid[y][x + 1]];
+      const counts = {};
+      nb.forEach((n) => (counts[n] = (counts[n] || 0) + 1));
+      const [top, cnt] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+      if (!nb.includes(ch) && cnt >= 3 && top !== '.' && top !== 'o') grid[y][x] = top;
+    }
+  }
+  return grid;
+}
+
+// Whiskers as clean 1px lines: one pixel per column along each curve.
+function drawWhiskers(grid, dy = 0) {
+  const k = N / 200;
+  for (const [p0, p1, p2] of WHISKERS) {
+    for (const flip of [false, true]) {
+      const done = new Set();
+      for (let i = 0; i <= 200; i++) {
+        const t = i / 200;
+        let x = (1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * p1[0] + t * t * p2[0];
+        const y = (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * p1[1] + t * t * p2[1];
+        if (flip) x = 200 - x;
+        const px = Math.floor(x * k), py = Math.floor(y * k) + dy;
+        if (done.has(px)) continue;
+        done.add(px);
+        if (grid[py][px] !== 'o') grid[py][px] = 'v';
+      }
+    }
+  }
+}
+
+async function partGrid(part, pose, markings) {
+  const svg = catSVG(keyCat(markings), { parts: [part], pose, markings: !!markings, pixel: true, spriteSize: N });
+  const grid = cleanup(quantize(await render(svg)));
+  if (part === 'head') drawWhiskers(grid);
+  return grid;
+}
+
+function crop(grid, keep = (ch) => ch !== '.') {
+  let x0 = N, y0 = N, x1 = -1, y1 = -1;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    if (keep(grid[y][x], x, y)) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  }
+  if (x1 < 0) return null;
+  const rows = [];
+  for (let y = y0; y <= y1; y++) {
+    let r = '';
+    for (let x = x0; x <= x1; x++) r += keep(grid[y][x], x, y) ? grid[y][x] : '.';
+    rows.push(r);
+  }
+  return { x: x0, y: y0, rows };
+}
+
+function layerJS(l, indent) {
+  if (!l) return 'null';
+  const pad = ' '.repeat(indent);
+  return `{\n${pad}  x: ${l.x}, y: ${l.y},\n${pad}  rows: [\n${l.rows.map((r) => `${pad}    '${r}',`).join('\n')}\n${pad}  ],\n${pad}}`;
+}
+
+// ---------- build ----------
+(async () => {
+  const report = [];
+  const parts = {};
+  const markings = Object.fromEntries(CATS.map((c) => [c.id, {}]));
+  const fullBase = {};
+
+  for (const [part, variants] of Object.entries(VARIANTS)) {
+    parts[part] = {};
+    for (const [vname, pose] of Object.entries(variants)) {
+      const base = await partGrid(part, pose, false);
+      fullBase[`${part}/${vname}`] = base;
+      parts[part][vname] = crop(base);
+      for (const cat of CATS) {
+        const marked = await partGrid(part, pose, cat.markings);
+        const overlay = crop(marked, (ch, x, y) => ch !== '.' && ch !== base[y][x]);
+        if (overlay) {
+          markings[cat.id][part] = markings[cat.id][part] || {};
+          markings[cat.id][part][vname] = overlay;
+        }
+        const lost = base.flat().filter((ch, i) => ch !== '.' && marked[Math.floor(i / N)][i % N] === '.').length;
+        if (lost) report.push(`WARN ${cat.id} ${part}/${vname}: markings removed ${lost} pixels`);
+      }
+    }
+  }
+
+  // Make the generated data visible to composeFrame().
+  window.PARTS = parts;
+  window.MARKINGS = markings;
+
+  // Check: every IDLE frame, composited from parts, against a direct full render of that pose.
+  for (const cat of CATS) {
+    let worst = 0;
+    for (let fi = 0; fi < IDLE.frames.length; fi++) {
+      const fr = IDLE.frames[fi];
+      const pose = {
+        ...VARIANTS.tail[fr.tail], ...VARIANTS.torso[fr.torso], ...VARIANTS.ears[fr.ears],
+        ...VARIANTS.eyes[fr.eyes], headUp: headUpAt(fr.headUp),
+      };
+      const direct = cleanup(quantize(await render(catSVG(keyCat(cat.markings), { pose, pixel: true, spriteSize: N }))));
+      drawWhiskers(direct, -pose.headUp);
+      const comp = composeFrame({ ...fr, headUp: pose.headUp }, cat.id, N);
+      let diff = 0;
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (direct[y][x] !== comp[y][x]) diff++;
+      worst = Math.max(worst, diff);
+      if (diff > N * N / 400) report.push(`CHECK ${cat.id} frame ${fi}: ${diff} px differ from direct render`);
+    }
+    report.push(`${cat.id}: worst frame differs from a direct render by ${worst} px (of ${N * N})`);
+  }
+
+  const counts = Object.fromEntries(Object.entries(parts).map(([p, v]) => [p, Object.keys(v).length]));
+  report.push('part variants: ' + JSON.stringify(counts));
+  for (const cat of CATS) {
+    report.push(`${cat.id} overlays: ` + JSON.stringify(Object.fromEntries(Object.entries(markings[cat.id]).map(([p, v]) => [p, Object.keys(v)]))));
+  }
+
+  // ---------- emit files ----------
+  const keyDocs = {
+    o: 'outline / pupil / mouth', h: 'fur highlight', j: 'fur light', b: 'fur base', u: 'fur mid shadow',
+    s: 'fur shadow', k: 'fur deep shadow', t: 'tabby stripe', w: 'white fur', x: 'white fur shadow',
+    g: 'iris light', e: 'iris', f: 'iris dark', n: 'nose pink', m: 'pink shadow', i: 'inner ear pink',
+    r: 'cheek blush', v: 'whiskers', y: 'eye shine', l: 'wood highlight', a: 'wood light', c: 'wood base',
+    z: 'wood mid shadow', d: 'wood shadow', q: 'wood deep shadow',
+  };
+  const legend = Object.entries(keyDocs).map(([k, v]) => `//   ${k}  ${v}`).join('\n');
+
+  const partsJS = `// Shared pixel parts for every Purrch cat — generated by vector/build-parts.html.
+// Each layer is a cropped grid of palette keys placed at (x, y) on the ${N} x ${N} sprite;
+// '.' is transparent. The same grids are used for all cats: colours come from cats.js.
+//
+// Keys:
+${legend}
+
+const PARTS = {
+${Object.entries(parts).map(([p, vs]) => `  ${p}: {
+${Object.entries(vs).map(([v, l]) => `    ${v}: ${layerJS(l, 4)},`).join('\n')}
+  },`).join('\n')}
+};
+`;
+
+  const markingsJS = `// Cat-specific marking overlays — generated by vector/build-parts.html.
+// MARKINGS[cat][part][variant] is drawn right after that part variant and moves with it.
+// Only pixels that differ from the shared part are stored. Edit a cat's overlay here to fix
+// its markings without touching the shared parts.
+
+const MARKINGS = {
+${CATS.map((cat) => `  ${cat.id}: {
+${Object.entries(markings[cat.id]).map(([p, vs]) => `    ${p}: {
+${Object.entries(vs).map(([v, l]) => `      ${v}: ${layerJS(l, 6)},`).join('\n')}
+    },`).join('\n')}
+  },`).join('\n')}
+};
+`;
+
+  const catsJS = `// Purrch cats — one palette per cat. Every cat shares the same pixel parts (parts.js);
+// switching palette is all it takes to switch cats. Markings live in markings.js.
+//
+// Palette keys:
+${legend}
+
+const CATS = [
+${CATS.map((cat) => {
+    const pal = paletteFor(cat);
+    return `  {
+    id: '${cat.id}',
+    name: '${cat.name}',
+    description: '${cat.description}',
+    palette: {
+      '.': null,
+${Object.keys(keyDocs).map((k) => `      ${k}: '${pal[k]}', // ${keyDocs[k]}`).join('\n')}
+    },
+  },`;
+  }).join('\n')}
+];
+`;
+
+  document.getElementById('parts').textContent = partsJS;
+  document.getElementById('markings').textContent = markingsJS;
+  document.getElementById('cats').textContent = catsJS;
+  document.getElementById('report').textContent = report.join('\n');
+  const links = document.getElementById('links');
+  links.textContent = '';
+  const files = [[`parts${SUFFIX}.js`, partsJS], [`markings${SUFFIX}.js`, markingsJS]];
+  // Palettes don't depend on size, so cats.js is only produced by the default 128 build.
+  if (!SUFFIX) files.push(['cats.js', catsJS]);
+  for (const [name, text] of files) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));
+    a.download = name;
+    a.textContent = `Download ${name}`;
+    links.appendChild(a);
+  }
+  document.body.dataset.done = '1';
+})().catch((e) => { document.getElementById('report').textContent = 'ERROR ' + e.stack; });
+</script>
+</body>
+</html>
